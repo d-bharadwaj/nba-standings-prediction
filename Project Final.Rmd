@@ -1,0 +1,121 @@
+---
+title: "Predicting NBA Wins Using Net Rating and True Shooting Percentage"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, warning=FALSE)
+library(tidyverse)
+library(lubridate)
+library(ggrepel)
+source("scripts/viridis.R")
+source("scripts/ggprob.R")
+```
+
+```{r, include = FALSE}
+nba_teams = read.csv("NBA2021TeamStats.csv")
+nba_current_teams = read.csv("NBA2022Teams.csv")
+nba_teams = nba_teams %>% 
+  arrange(desc(W))
+```
+
+**Introduction**
+
+Predicting NBA team performance and league standings has captivated the attention of front offices, fans and analysts alike since the league’s inception. Whether planning future draft strategy, playoff chances or the hundreds of millions of dollars of sports-betting futures at stake, the implications of having a robust performance model touches essentially every aspect of the professional basketball industry. Using keystone statistics such as number of wins, net rating and true shooting percentage, creating a regression model as described above is possible. Using prior season team-based statistics, our project attempts to accurately predict the records of all 30 NBA teams for the 2022-2023 season.
+
+**Background**
+
+The team-based data that we are using is from Basketball-Reference.com. Basketball-Reference.com is the leading NBA statistics repository, drawing directly upon game data collected and guaranteed by the National Basketball League itself. This data is physically collected by “optical tracking” (NBA.com) systems composed of several cameras positioned in every NBA stadium. Managed by statistics contractor Second Spectrum, this optical data is viewed by an algorithm that attributes every ball and body movement to a specific player and therefore that team. According to third party audits, their data is highly accurate and complete.
+
+It is important to note that we are using team data, that is, data that is an aggregate of every player that got playing time at any point during the 82-game season. An example of this is a teams’ free throw shooting percentage for one game. This is not assignable to any individual player, but rather the entire team itself. Moreover, taking all 82 games, a team wide, full season free throw shooting percentage can be derived. All our data points are structured in this aggregated, full season way.
+
+**Analysis**
+
+We chose three statistics based on the prior season to construct our model with. Number of wins, net rating and true shooting percentage. We ran a regression of net rating vs. number of wins as well as true shooting percentage vs. number of wins to discover correlation coefficients (r-squared values) between these variables. Net rating measures a team’s point differential per 100 possessions. This number can be positive or negative and is a zero-sum value when adding up all 30 teams’ rating. This stat considers both offensive and defensive performance.
+
+True shooting percentage is a measure of team shooting efficiency. It measures what percent of field goal attempts are made and then adjusts for free throw efficiency. The formula is as follows:
+
+**0.5 * (Total Points) / [(Total Field Goal Attempts) + 0.44 * (Total Free Throw Attempts)]^[NBAStuffer.com]**
+
+Fundamentally, this stat measures how good a team is at capitalizing on their shooting opportunities. It is a purely offensive metric and gives a numeric summary of how effective a team’s offense is at scoring
+
+```{r}
+ggplot(nba_teams, aes(y = W, x = NRtg)) +
+  geom_point(color = "red") +
+  geom_smooth(se = FALSE, method = "lm") +
+  labs(y = "Total Wins", x = "Net Rating", title = "Total Wins vs Net Rating") +
+  geom_label_repel(aes(label = Team), size = 2)
+
+ggplot(nba_teams, aes(y = W, x = TS.)) +
+  geom_point(color = "red") +
+  geom_smooth(se = FALSE, method = "lm") +
+  labs(y = "Total Wins", x = "True Shooting Pecentage", title = "Total Wins vs True Shooting Percentage") +
+  geom_label_repel(aes(label = Team), size = 2)
+```
+
+```{r, include = FALSE}
+NRtg=nba_teams[13]
+TS. = nba_teams[17]
+lm = lm(W ~ NRtg + TS., data = nba_teams)
+summary(lm)
+
+Intercept = coef(lm)[1]
+NRtg_s = coef(lm)[2]
+TS_s = coef(lm)[3]
+```
+
+
+We chose to use these statistics because they describe how skilled a team is offensively and defensively, while also considering efficiency and how they make the most of offensive possesions. 
+
+Considering net rating and true shooting percentage, we were able to derive a formula which allowed us to predict NBA teams’ ability to win.
+
+```{r}
+predicted = nba_teams %>% 
+  mutate(predicted_wins = NRtg * NRtg_s + TS. * TS_s + Intercept) %>% 
+  select(Team, W, predicted_wins) %>% 
+  mutate(residuals = predicted_wins - W) %>% 
+  arrange(desc(predicted_wins))
+
+ggplot(predicted) +
+  geom_point(aes(y = Team, x = residuals)) +
+  geom_vline(xintercept = 0, color = "red", linetype = "dashed") +
+  labs(x = "Residuals", y = "Teams", title = "Residual Plot For Each Team in The 2021-2022 NBA Season")
+
+ggplot(predicted) +
+  geom_col(aes(y =  reorder(Team, predicted_wins), x = predicted_wins, fill = Team), show.legend = FALSE) +
+  labs(x = "Predicted Wins", y = "Team", title = "Predicted Wins For Each Team from the 2021-2022 NBA Season")
+```
+
+Now we use the model we found using the previous season, to predict the total wins at the end of the current NBA season. 
+```{r}
+predicted2022 = nba_current_teams %>% 
+  mutate(predicted_wins = round(NRtg * NRtg_s + TS. * TS_s + Intercept)) %>% 
+  select(Team, predicted_wins) %>% 
+  arrange(desc(predicted_wins))
+  
+ggplot(predicted2022) +
+  geom_col(aes(y =  reorder(Team, predicted_wins), x = predicted_wins, fill = Team), show.legend = FALSE) +
+  labs(x = "Predicted Wins", y = "Team", title = "Predicted Wins For Each Team in the 2022-2023 NBA Season")
+```
+
+
+**Discussion**
+
+The tables rankings are our best attempt at using last seasons team data to predict future team winning success.
+
+These changes vary in extremity across teams. This graph does not account for sudden changes in team roster midseason or injuries. Using this stat as a deterministic element in our model gives more emphasis on offensive production in our rankings. It argues that taking advantage of shooting opportunities leads to more wins than being focused on shutting down opponents on defense.
+
+Some important to mention outliers from our model from the previous season would be the Phoenix Suns, the Boston Celtics, and Indiana Pacers. The Suns are an outlier because their record from the previous season was was significantly better than the rest of the NBA. While our model still predicts them to have the best record, they were still comparable to other teams. Our model does not predict that they will have a statistical outlying season. Where as the Celtics have a record that significantly undershot the prediction based on their production. Our model predicts them to be as good as the statically over preforming Suns, and evidence of that can be seen as they played in the NBA finals that season. And the Celtics currently have the best record in the Eastern conference right now, where as the Suns have the best record in the Western Conference right now. The biggest statistical outlier we had in our model was the Indiana Pacers. The Pacers did not win many games last season, however among bottom tier teams they were much closer to an average team in terms of offensive efficiency. This indicates that while they were a bad team, they perhaps lost many close games that were within reach, but just didn't fall their way. Leading to a worse overall record in terms of wins last season. 
+
+Using the same model from the previous season, we inserted the stats of the current NBA season so far into our model, and it very accurately compares to the current standings of the current NBA. For example, the Sacramento Kings have greatly over performed their expectations going into the season, and in this model they are a top team in the NBA indicating that their wins are not some hot streak. As well as the Cleveland Cavaliers which were riddled with injuries last season and made many improvements in the offseason to become a top team.
+
+Another important note is that while net rating considers both offensive and defensive performance, true shooting percentage is a purely offensive statistic. (again, may be subject to change).
+
+**Conclusion**
+
+We used historical data metrics that we found to be correlated with NBA team success to predict future NBA teams’ records. While our chosen metrics, net rating, and true shooting percentage, correlated quite well to winning percentage in the 2021-2022 NBA season, it is not as effective in predicting future team success. This is due to off-season changes such as trades and players overcoming injuries that change rosters and therefore performance. It is also important to note that one unquantifiable factor seems to have a large affect on NBA standings: luck. While we did not account for these factors, our rankings are still fairly accurate. In assessing our model’s success, it’s important to note that only roughly 30% of NBA games have been played yet – not nearly enough to make a determination of our model’s success. Creating a perfectly predictive model is… impossible. Armed with data and statistical methods, it is possible to create a working model and we believe we have successfully done that.
+
+References https://www.basketball-reference.com/leagues/NBA_2022.html
+
